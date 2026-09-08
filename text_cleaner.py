@@ -1,6 +1,6 @@
 import re
 
-# Los Datos Crudos (Mantenemos exactamente el texto con sus espacios y saltos de línea)
+# 📦 Los Datos Crudos (Mantenemos exactamente el texto original)
 raw_text = """homEwork:
   tHis iz your homeWork, copy these Text to variable.
 
@@ -10,73 +10,129 @@ raw_text = """homEwork:
 
   last iz TO calculate nuMber OF Whitespace characteRS in this Tex. caREFULL, not only Spaces, but ALL whitespaces. I got 87."""
 
-print("--- EJECUCIÓN DEL SCRIPT DE DATA QUALITY ---\n")
+
+def count_whitespaces(text: str) -> int:
+    """
+    Calcula el número exacto de caracteres de espacio en blanco (Paso 4).
+    Detecta espacios simples, tabulaciones y saltos de línea.
+    """
+    return sum(1 for char in text if char.isspace())
+
+
+def _capitalize_sentence(s: str) -> str:
+    """
+    Función auxiliar (helper) para capitalizar una oración individual.
+    Pone la primera letra en mayúscula, el resto en minúscula,
+    pero mantiene el pronombre 'I' en mayúscula de forma robusta.
+    """
+    words_and_spaces = re.split(r'(\b\w+\b)', s)
+    first_word_found = False
+
+    for j in range(len(words_and_spaces)):
+        token = words_and_spaces[j]
+        if token.isalnum():
+            if not first_word_found:
+                words_and_spaces[j] = token.capitalize()
+                first_word_found = True
+            else:
+                # Regla de DQ: Preservamos el pronombre 'I' en mayúscula
+                if token.lower() == 'i':
+                    words_and_spaces[j] = 'I'
+                else:
+                    words_and_spaces[j] = token.lower()
+
+    return "".join(words_and_spaces)
+
+
+def normalize_text(text: str) -> str:
+    """
+    Normaliza el uso de mayúsculas y minúsculas en el texto (Paso 1).
+    Divide por puntos y saltos de línea para identificar correctamente
+    los límites de las oraciones sin alterar la estructura original.
+    """
+    # Dividimos por puntos (.) o saltos de línea (\n), guardando los delimitadores
+    tokens = re.split(r'(\.|\n)', text)
+    normalized_tokens = []
+
+    for token in tokens:
+        if token in ('.', '\n'):
+            normalized_tokens.append(token)
+        else:
+            if any(char.isalpha() for char in token):
+                normalized_tokens.append(_capitalize_sentence(token))
+            else:
+                normalized_tokens.append(token)
+
+    return "".join(normalized_tokens)
+
+
+def fix_typos(text: str) -> str:
+    """
+    Corrige los errores de 'iz' -> 'is' utilizando expresiones regulares (Paso 2).
+    Evita falsos positivos como modificar texto explicativo entre comillas.
+    """
+    return re.sub(r'(?<![“\"\w])iz(?![”\"\w])', 'is', text, flags=re.IGNORECASE)
+
+
+def extract_last_words_and_append(text: str) -> str:
+    """
+    Extrae la última palabra de cada oración válida (ignorando encabezados) (Paso 3).
+    Construye una nueva oración y la añade al final del párrafo.
+    """
+    # Dividimos por puntos (.) y saltos de línea (\n)
+    tokens = re.split(r'(\.|\n)', text)
+    last_words = []
+
+    for token in tokens:
+        if token in ('.', '\n'):
+            continue
+
+        stripped = token.strip()
+        if not stripped:
+            continue
+
+        # Regla de DQ: Si termina en dos puntos ':', es un título/encabezado, no una oración.
+        if stripped.endswith(':'):
+            continue
+
+        # Extraemos todas las palabras alfanuméricas de este segmento
+        words = re.findall(r'\b\w+\b', token)
+        if words:
+            # Nos quedamos con la última palabra del segmento
+            last_words.append(words[-1])
+
+    # Creamos la nueva oración
+    new_sentence = " ".join(last_words).capitalize() + "."
+
+    # Buscamos si hay espacios o saltos de línea al final del texto original
+    match = re.search(r'(\s*)$', text)
+    trailing_whitespace = match.group(1) if match else ""
+
+    # Limpiamos el texto al final, agregamos la oración y devolvemos la estructura
+    cleaned_text = text.rstrip()
+    return cleaned_text + " " + new_sentence + trailing_whitespace
+
 
 # ==========================================
-# STEP 4: Data Profiling (Whitespace Counter)
+# 🖥️ BLOQUE DE EJECUCIÓN PRINCIPAL (PIPELINE)
 # ==========================================
-# Regla de DQ: El perfilado de datos originales se hace ANTES de cualquier limpieza.
-# .isspace() detecta espacios ordinarios, tabulaciones (\t) y saltos de línea (\n).
-whitespace_count = sum(1 for char in raw_text if char.isspace())
-print(f"Paso 4 -> Total de caracteres de espacio en blanco: {whitespace_count}")
-# Validación: Debería dar exactamente 87.
+if __name__ == "__main__":
+    print("--- EJECUCIÓN DEL SCRIPT DE DATA QUALITY (REFRACTORIZADO) ---\n")
 
+    # 📊 Paso 4: Data Profiling (Whitespace Counter)
+    # Se ejecuta primero sobre el texto crudo para no alterar la métrica original.
+    total_spaces = count_whitespaces(raw_text)
+    print(f"Paso 4 -> Total de caracteres de espacio en blanco: {total_spaces}")
+    # Validación: Dará exactamente 87.
 
-# ==========================================
-# STEP 1: Normalization (Letter Cases)
-# ==========================================
-# Dividimos el texto usando el punto (.) como fin de oración
-raw_sentences = raw_text.split('.')
+    # 🔠 Paso 1: Normalization (Letter Cases)
+    step_1 = normalize_text(raw_text)
 
-# Filtramos elementos vacíos (como el espacio que queda después del último punto)
-sentences = [s for s in raw_sentences if s.strip()]
+    # 🛠️ Paso 2: Fixing Typos
+    step_2 = fix_typos(step_1)
 
-# Truco de DQ: Si usamos .capitalize() directamente en un texto con saltos de línea
-# o espacios al inicio, Python no capitalizará la primera letra real.
-# Creamos esta función para buscar la primera letra real y capitalizarla sin romper el formato.
-def capitalize_sentence(s):
-    for i, char in enumerate(s):
-        if char.isalpha():
-            # Ponemos la primera letra en mayúscula, el resto en minúscula y preservamos lo anterior
-            return s[:i] + char.upper() + s[i+1:].lower()
-    return s.lower()
+    # 🔍 Paso 3: Extracting Data and Appending
+    final_text = extract_last_words_and_append(step_2)
 
-normalized_sentences = [capitalize_sentence(s) for s in sentences]
-
-
-# ==========================================
-# STEP 2: Fixing Typos ("iz" -> "is")
-# ==========================================
-# Regla de DQ: Evitar falsos positivos. No debemos corregir "iz" si está dentro de comillas
-# explicando el error (ej: fix“iZ” con correct “is”).
-cleaned_sentences = []
-for s in normalized_sentences:
-    # Usamos Expresiones Regulares (regex) avanzadas:
-    # (?<![“\"\w]) -> Asegura que 'iz' no esté precedido por letras ni comillas (evita fix“iz”)
-    # (?![”\"\w]) -> Asegura que 'iz' no esté seguido por letras ni comillas
-    cleaned_s = re.sub(r'(?<![“\"\w])iz(?![”\"\w])', 'is', s)
-    cleaned_sentences.append(cleaned_s)
-
-
-# ==========================================
-# STEP 3: Extracting Data (The Last Words)
-# ==========================================
-last_words = []
-for s in cleaned_sentences:
-    words = s.split()
-    if words:
-        # Extraemos la última palabra de cada oración limpia
-        last_words.append(words[-1])
-
-# Creamos la nueva oración uniendo las palabras extraídas
-new_sentence = " ".join(last_words).capitalize() + "."
-
-
-# ==========================================
-# ENSAMBLADO FINAL
-# ==========================================
-# Unimos las oraciones limpias con su punto original y añadimos la nueva oración al final
-cleaned_paragraph = ".".join(cleaned_sentences) + ". " + new_sentence
-
-print("\nTexto Limpio y Normalizado:")
-print(cleaned_paragraph)
+    print("\nTexto Limpio y Normalizado:")
+    print(final_text)
